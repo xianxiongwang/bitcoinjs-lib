@@ -27,7 +27,12 @@ function Transaction () {
   this.ins = []
   this.outs = []
   this.joinsplits = []
+  this.fOverwintered=false
+  this.nVersionGroupId=0x03C48270
+  this.nExpiryHeight=0
 }
+
+Transaction.OVERWINTER_VERSION_GROUP_ID=0x03C48270
 
 Transaction.DEFAULT_SEQUENCE = 0xffffffff
 Transaction.SIGHASH_ALL = 0x01
@@ -326,9 +331,13 @@ Transaction.prototype.joinsplitByteLength = function () {
 
 Transaction.prototype.__byteLength = function (__allowWitness) {
   var hasWitnesses = __allowWitness && this.hasWitnesses()
-
-  return (
+  
+  var isOverwinterV3 = this.fOverwintered && this.nVersionGroupId == OVERWINTER_VERSION_GROUP_ID && this.version >= 3; 
+  
+ return (
     (hasWitnesses ? 10 : 8) +
+    (this.fOverwintered ? 4 : 0) +
+    (isOverwinterV3 ? 4 : 0) +
     varuint.encodingLength(this.ins.length) +
     varuint.encodingLength(this.outs.length) +
     this.ins.reduce(function (sum, input) { return sum + 40 + varSliceSize(input.script) }, 0) +
@@ -343,6 +352,9 @@ Transaction.prototype.clone = function () {
   newTx.version = this.version
   newTx.locktime = this.locktime
   newTx.zcash = this.zcash
+  newTx.fOverwintered = this.fOverwintered
+  newTx.nVersionGroupId = this.nVersionGroupId
+  newTx.nExpiryHeight = this.nExpiryHeight
 
   newTx.ins = this.ins.map(function (txIn) {
     return {
@@ -562,7 +574,20 @@ Transaction.prototype.__toBuffer = function (buffer, initialOffset, __allowWitne
     writeSlice(i.x)
   }
 
-  writeInt32(this.version)
+  var isOverwinterV3 = this.fOverwintered && this.nVersionGroupId == OVERWINTER_VERSION_GROUP_ID && this.version >= 3; 
+  
+  
+  var header = this.version;
+  if (this.fOverwintered) {
+    header |= 1 << 31;
+  }
+  writeInt32(header)
+  
+  //writeInt32(this.version)
+
+  if (this.fOverwintered) {
+    writeInt32(this.nVersionGroupId);
+  }
 
   var hasWitnesses = __allowWitness && this.hasWitnesses()
 
@@ -598,6 +623,10 @@ Transaction.prototype.__toBuffer = function (buffer, initialOffset, __allowWitne
   }
 
   writeUInt32(this.locktime)
+
+  if(isOverwinterV3){
+    writeInt32(this.nExpiryHeight)
+  }
 
   if (this.version >= 2 && this.zcash) {
     writeVarInt(this.joinsplits.length)
